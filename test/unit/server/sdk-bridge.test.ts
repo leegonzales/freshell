@@ -352,6 +352,26 @@ describe('SdkBridge', () => {
     })
   })
 
+  describe('AskUserQuestion auto-approval', () => {
+    it('auto-approves AskUserQuestion in canUseTool without broadcasting permission', async () => {
+      mockKeepStreamOpen = true
+      const session = await bridge.createSession({ cwd: '/tmp' })
+      const received: any[] = []
+      bridge.subscribe(session.sessionId, (msg) => received.push(msg))
+
+      // Wait for canUseTool to be captured by mock
+      await new Promise(resolve => setTimeout(resolve, 50))
+
+      // Call canUseTool with AskUserQuestion
+      const result = await mockCanUseTool('AskUserQuestion', { questions: [] }, {})
+      expect(result.behavior).toBe('allow')
+
+      // No permission request should have been broadcast
+      const permMsgs = received.filter(m => m.type === 'sdk.permission.request')
+      expect(permMsgs).toHaveLength(0)
+    })
+  })
+
   describe('message buffering', () => {
     it('buffers messages before first subscriber and replays on subscribe', async () => {
       mockKeepStreamOpen = true

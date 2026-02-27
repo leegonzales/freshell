@@ -89,6 +89,10 @@ export class SdkBridge extends EventEmitter {
           log.warn({ sessionId, data: data.trimEnd() }, 'SDK subprocess stderr')
         },
         canUseTool: async (toolName, input, ctx) => {
+          // Auto-approve AskUserQuestion — handled via interactive QuestionBanner UI
+          if (toolName === 'AskUserQuestion') {
+            return { behavior: 'allow' as const, updatedInput: input }
+          }
           return this.handlePermissionRequest(sessionId, toolName, input as Record<string, unknown>, ctx)
         },
         settingSources: ['user', 'project', 'local'],

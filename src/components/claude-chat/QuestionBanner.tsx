@@ -15,7 +15,10 @@ function QuestionBanner({ question, onAnswer, disabled }: QuestionBannerProps) {
   const [usingOther, setUsingOther] = useState<Record<string, boolean>>({})
 
   const handleOptionClick = useCallback((header: string, label: string, multiSelect: boolean) => {
-    setUsingOther(prev => ({ ...prev, [header]: false }))
+    if (!multiSelect) {
+      // Single-select: choosing a predefined option clears Other
+      setUsingOther(prev => ({ ...prev, [header]: false }))
+    }
     setSelections(prev => {
       if (multiSelect) {
         const current = (prev[header] as string[]) || []
@@ -29,12 +32,20 @@ function QuestionBanner({ question, onAnswer, disabled }: QuestionBannerProps) {
     })
   }, [])
 
-  const handleOtherToggle = useCallback((header: string) => {
+  const handleOtherToggle = useCallback((header: string, multiSelect: boolean) => {
     setUsingOther(prev => {
       const next = !prev[header]
-      if (next) {
-        // Clear option selection when switching to Other
+      if (next && !multiSelect) {
+        // Single-select: clear predefined selection when switching to Other
         setSelections(p => {
+          const copy = { ...p }
+          delete copy[header]
+          return copy
+        })
+      }
+      if (!next) {
+        // Turning off Other: clear the Other input
+        setOtherInputs(p => {
           const copy = { ...p }
           delete copy[header]
           return copy
@@ -44,22 +55,44 @@ function QuestionBanner({ question, onAnswer, disabled }: QuestionBannerProps) {
     })
   }, [])
 
-  const handleOtherChange = useCallback((header: string, value: string, multiSelect: boolean) => {
+  const handleOtherChange = useCallback((header: string, value: string) => {
     setOtherInputs(prev => ({ ...prev, [header]: value }))
-    setSelections(prev => ({ ...prev, [header]: multiSelect ? [value] : value }))
   }, [])
 
+  // Build final answers merging predefined selections + Other text
+  const buildAnswers = useCallback((): Record<string, string | string[]> => {
+    const answers: Record<string, string | string[]> = {}
+    for (const q of question.questions) {
+      if (q.multiSelect) {
+        const predefined = Array.isArray(selections[q.header]) ? (selections[q.header] as string[]) : []
+        const otherText = usingOther[q.header] ? otherInputs[q.header]?.trim() : ''
+        const combined = otherText ? [...predefined, otherText] : predefined
+        answers[q.header] = combined
+      } else {
+        if (usingOther[q.header]) {
+          answers[q.header] = otherInputs[q.header]?.trim() || ''
+        } else {
+          answers[q.header] = selections[q.header] || ''
+        }
+      }
+    }
+    return answers
+  }, [question.questions, selections, usingOther, otherInputs])
+
   const allAnswered = question.questions.every(q => {
+    if (q.multiSelect) {
+      const predefined = Array.isArray(selections[q.header]) ? (selections[q.header] as string[]).length : 0
+      const hasOther = usingOther[q.header] && !!otherInputs[q.header]?.trim()
+      return predefined > 0 || hasOther
+    }
     if (usingOther[q.header]) return !!otherInputs[q.header]?.trim()
-    const sel = selections[q.header]
-    if (q.multiSelect) return Array.isArray(sel) && sel.length > 0
-    return typeof sel === 'string' && sel.length > 0
+    return typeof selections[q.header] === 'string' && (selections[q.header] as string).length > 0
   })
 
   const handleSubmit = useCallback(() => {
     if (!allAnswered) return
-    onAnswer(question.requestId, selections)
-  }, [allAnswered, onAnswer, question.requestId, selections])
+    onAnswer(question.requestId, buildAnswers())
+  }, [allAnswered, onAnswer, question.requestId, buildAnswers])
 
   return (
     <div
@@ -109,7 +142,7 @@ function QuestionBanner({ question, onAnswer, disabled }: QuestionBannerProps) {
             <button
               type="button"
               disabled={disabled}
-              onClick={() => handleOtherToggle(q.header)}
+              onClick={() => handleOtherToggle(q.header, q.multiSelect)}
               className={cn(
                 'px-2.5 py-1 text-xs rounded-md border transition-colors',
                 'disabled:opacity-50',
@@ -140,7 +173,7 @@ function QuestionBanner({ question, onAnswer, disabled }: QuestionBannerProps) {
             <input
               type="text"
               value={otherInputs[q.header] || ''}
-              onChange={(e) => handleOtherChange(q.header, e.target.value, q.multiSelect)}
+              onChange={(e) => handleOtherChange(q.header, e.target.value)}
               placeholder="Type your answer..."
               disabled={disabled}
               className="w-full px-2 py-1 text-xs rounded border border-border bg-background focus:border-blue-500 focus:outline-none"

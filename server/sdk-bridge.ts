@@ -89,9 +89,9 @@ export class SdkBridge extends EventEmitter {
           log.warn({ sessionId, data: data.trimEnd() }, 'SDK subprocess stderr')
         },
         canUseTool: async (toolName, input, ctx) => {
-          // Auto-approve AskUserQuestion — handled via interactive QuestionBanner UI
+          // Intercept AskUserQuestion — hold promise until user answers via QuestionBanner UI
           if (toolName === 'AskUserQuestion') {
-            return { behavior: 'allow' as const, updatedInput: input }
+            return this.handleQuestionPermission(sessionId, input as Record<string, unknown>, ctx.toolUseID)
           }
           return this.handlePermissionRequest(sessionId, toolName, input as Record<string, unknown>, ctx)
         },
@@ -265,12 +265,6 @@ export class SdkBridge extends EventEmitter {
           model: (aMsg.message as any)?.model,
         })
 
-        // Intercept AskUserQuestion tool calls for interactive UI
-        for (const block of blocks) {
-          if (block.type === 'tool_use' && block.name === 'AskUserQuestion') {
-            this.handleQuestionRequest(sessionId, block.id, block.input as Record<string, unknown>)
-          }
-        }
         break
       }
 
@@ -363,13 +357,13 @@ export class SdkBridge extends EventEmitter {
     })
   }
 
-  private handleQuestionRequest(
+  private handleQuestionPermission(
     sessionId: string,
-    toolUseId: string,
     input: Record<string, unknown>,
-  ): void {
+    toolUseId: string,
+  ): Promise<PermissionResult> {
     const state = this.sessions.get(sessionId)
-    if (!state) return
+    if (!state) return Promise.resolve({ behavior: 'deny' as const, message: 'Session not found' })
 
     const requestId = nanoid()
     const questions = (input.questions as Array<{
@@ -379,19 +373,21 @@ export class SdkBridge extends EventEmitter {
       multiSelect: boolean
     }>) || []
 
-    state.pendingQuestions.set(requestId, {
-      toolUseId,
-      questions,
-      resolve: () => {},  // placeholder -- resolved by respondQuestion
-    })
+    return new Promise((resolve) => {
+      state.pendingQuestions.set(requestId, {
+        toolUseId,
+        questions,
+        resolve,
+      })
 
-    this.broadcastToSession(sessionId, {
-      type: 'sdk.question.request',
-      sessionId,
-      requestId,
-      toolUseId,
-      questions,
-    } as any)
+      this.broadcastToSession(sessionId, {
+        type: 'sdk.question.request',
+        sessionId,
+        requestId,
+        toolUseId,
+        questions,
+      } as any)
+    })
   }
 
   getSession(sessionId: string): SdkSessionState | undefined {
@@ -499,32 +495,13 @@ export class SdkBridge extends EventEmitter {
     if (!pending) return false
 
     state!.pendingQuestions.delete(requestId)
-    this.injectQuestionAnswer(sessionId, pending.toolUseId, answers)
-    return true
-  }
-
-  private injectQuestionAnswer(
-    sessionId: string,
-    toolUseId: string,
-    answers: Record<string, string | string[]>,
-  ): void {
-    const sp = this.processes.get(sessionId)
-    const state = this.sessions.get(sessionId)
-    if (!sp || !state) return
-
-    sp.inputStream.push({
-      type: 'user',
-      message: {
-        role: 'user',
-        content: [{
-          type: 'tool_result',
-          tool_use_id: toolUseId,
-          content: JSON.stringify({ type: 'tool_result', answers }),
-        }],
-      },
-      parent_tool_use_id: null,
-      session_id: state.cliSessionId || 'default',
+    // Resolve the canUseTool promise with allow + answers as updatedInput
+    // The SDK will execute the tool with the user's answers
+    pending.resolve({
+      behavior: 'allow' as const,
+      updatedInput: { answers },
     })
+    return true
   }
 
   interrupt(sessionId: string): boolean {

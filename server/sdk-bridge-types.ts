@@ -77,7 +77,7 @@ export interface SdkSessionState {
   pendingQuestions: Map<string, {
     toolUseId: string
     questions: Array<{ question: string; header: string; options: Array<{ label: string; description: string }>; multiSelect: boolean }>
-    resolve: () => void
+    resolve: (result: PermissionResult) => void
   }>
   costUsd: number
   totalInputTokens: number

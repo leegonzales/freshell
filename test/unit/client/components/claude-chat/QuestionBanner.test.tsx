@@ -123,6 +123,39 @@ describe('QuestionBanner', () => {
     expect(onAnswer).toHaveBeenCalledWith('q-3', { 'Features': ['Custom feature'] })
   })
 
+  it('multi-select: Other is additive with predefined selections', async () => {
+    const multiQuestion: QuestionRequest = {
+      requestId: 'q-4',
+      toolUseId: 'tool-q4',
+      questions: [{
+        question: 'Select all that apply.',
+        header: 'Test',
+        options: [
+          { label: 'Alpha', description: 'First option' },
+          { label: 'Beta', description: 'Second option' },
+          { label: 'Gamma', description: 'Third option' },
+        ],
+        multiSelect: true,
+      }],
+    }
+    const onAnswer = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <QuestionBanner question={multiQuestion} onAnswer={onAnswer} />
+    )
+
+    // Select predefined options
+    await user.click(screen.getByText('Alpha'))
+    await user.click(screen.getByText('Beta'))
+    // Also select Other and type custom text
+    await user.click(screen.getByRole('button', { name: 'Provide a custom answer' }))
+    await user.type(screen.getByPlaceholderText('Type your answer...'), 'Delta')
+    await user.click(screen.getByRole('button', { name: 'Submit answers' }))
+
+    // Should include both predefined AND custom answer
+    expect(onAnswer).toHaveBeenCalledWith('q-4', { 'Test': ['Alpha', 'Beta', 'Delta'] })
+  })
+
   it('submits with custom Other answer', async () => {
     const onAnswer = vi.fn()
     const user = userEvent.setup()

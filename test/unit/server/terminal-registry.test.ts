@@ -734,12 +734,16 @@ describe('buildSpawnSpec Unix paths', () => {
       mockPlatform('darwin')
     })
 
-    it('spawns claude command directly without shell wrapper', () => {
+    it('spawns claude through a login shell to inherit profile env vars', () => {
       delete process.env.CLAUDE_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('claude', '/Users/john/project', 'system')
 
-      expect(spec.file).toBe('claude')
+      expect(spec.file).toBe('/bin/zsh')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain('exec')
+      expect(spec.args[1]).toContain('claude')
       expect(spec.cwd).toBe('/Users/john/project')
     })
 
@@ -748,7 +752,7 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('claude', '/Users/john', 'system')
 
-      expect(spec.file).toBe('/usr/local/bin/claude-dev')
+      expect(spec.args[1]).toContain('/usr/local/bin/claude-dev')
     })
 
     it('passes --resume flag with session ID when resuming', () => {
@@ -756,9 +760,9 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('claude', '/Users/john', 'system', VALID_CLAUDE_SESSION_ID)
 
-      expect(spec.file).toBe('claude')
-      expect(spec.args).toContain('--resume')
-      expect(spec.args).toContain(VALID_CLAUDE_SESSION_ID)
+      expect(spec.file).toBe('/bin/zsh')
+      expect(spec.args[1]).toContain('--resume')
+      expect(spec.args[1]).toContain(VALID_CLAUDE_SESSION_ID)
     })
 
     it('omits --resume when resumeSessionId is invalid', () => {
@@ -766,7 +770,7 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('claude', '/Users/john', 'system', 'not-a-uuid')
 
-      expect(spec.args).not.toContain('--resume')
+      expect(spec.args[1]).not.toContain('--resume')
     })
 
     it('does not include --resume when no session ID provided', () => {
@@ -774,8 +778,20 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('claude', '/Users/john', 'system')
 
-      expect(spec.args).not.toContain('--resume')
-      expectClaudeTurnCompleteArgs(spec.args)
+      expect(spec.args[1]).not.toContain('--resume')
+    })
+
+    it('properly quotes arguments with special characters in login shell command', () => {
+      delete process.env.CLAUDE_CMD
+
+      const spec = buildSpawnSpec('claude', '/Users/john', 'system', undefined, {
+        permissionMode: 'bypassPermissions',
+      })
+
+      // The -lc command string should contain properly quoted args
+      const cmdStr = spec.args[1]
+      expect(cmdStr).toContain('--permission-mode')
+      expect(cmdStr).toContain('bypassPermissions')
     })
   })
 
@@ -784,13 +800,16 @@ describe('buildSpawnSpec Unix paths', () => {
       mockPlatform('linux')
     })
 
-    it('spawns codex command directly', () => {
+    it('spawns codex through a login shell', () => {
       delete process.env.CODEX_CMD
+      process.env.SHELL = '/bin/bash'
 
       const spec = buildSpawnSpec('codex', '/home/user/project', 'system')
 
-      expect(spec.file).toBe('codex')
-      expectCodexTurnCompleteArgs(spec.args)
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain('exec')
+      expect(spec.args[1]).toContain('codex')
       expect(spec.cwd).toBe('/home/user/project')
     })
 
@@ -799,17 +818,19 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('codex', '/home/user', 'system')
 
-      expect(spec.file).toBe('/opt/codex/bin/codex')
+      expect(spec.args[1]).toContain('/opt/codex/bin/codex')
     })
 
     it('adds resume subcommand when resumeSessionId provided', () => {
       delete process.env.CODEX_CMD
+      process.env.SHELL = '/bin/bash'
 
       const spec = buildSpawnSpec('codex', '/home/user/project', 'system', 'session-123')
 
-      expect(spec.file).toBe('codex')
-      expectCodexTurnCompleteArgs(spec.args)
-      expect(spec.args.slice(-2)).toEqual(['resume', 'session-123'])
+      expect(spec.file).toBe('/bin/bash')
+      const cmdStr = spec.args[1]
+      expect(cmdStr).toContain('resume')
+      expect(cmdStr).toContain('session-123')
     })
   })
 
@@ -825,10 +846,9 @@ describe('buildSpawnSpec Unix paths', () => {
         permissionMode: 'bypassPermissions',
       })
 
-      expect(spec.args).toContain('--permission-mode')
-      expect(spec.args).toContain('bypassPermissions')
-      const idx = spec.args.indexOf('--permission-mode')
-      expect(spec.args[idx + 1]).toBe('bypassPermissions')
+      const cmdStr = spec.args[1]
+      expect(cmdStr).toContain('--permission-mode')
+      expect(cmdStr).toContain('bypassPermissions')
     })
 
     it('includes --permission-mode flag for acceptEdits mode', () => {
@@ -838,9 +858,9 @@ describe('buildSpawnSpec Unix paths', () => {
         permissionMode: 'acceptEdits',
       })
 
-      const idx = spec.args.indexOf('--permission-mode')
-      expect(idx).toBeGreaterThan(-1)
-      expect(spec.args[idx + 1]).toBe('acceptEdits')
+      const cmdStr = spec.args[1]
+      expect(cmdStr).toContain('--permission-mode')
+      expect(cmdStr).toContain('acceptEdits')
     })
 
     it('omits --permission-mode flag when not provided', () => {
@@ -848,7 +868,8 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('claude', '/Users/john/project', 'system')
 
-      expect(spec.args).not.toContain('--permission-mode')
+      const cmdStr = spec.args[1]
+      expect(cmdStr).not.toContain('--permission-mode')
     })
 
     it('omits --permission-mode flag when set to default', () => {
@@ -858,7 +879,8 @@ describe('buildSpawnSpec Unix paths', () => {
         permissionMode: 'default',
       })
 
-      expect(spec.args).not.toContain('--permission-mode')
+      const cmdStr = spec.args[1]
+      expect(cmdStr).not.toContain('--permission-mode')
     })
 
     it('omits --permission-mode for shell mode even if provided', () => {
@@ -866,6 +888,7 @@ describe('buildSpawnSpec Unix paths', () => {
         permissionMode: 'bypassPermissions',
       })
 
+      // Shell mode uses direct args, not -lc wrapper
       expect(spec.args).not.toContain('--permission-mode')
     })
 
@@ -876,10 +899,11 @@ describe('buildSpawnSpec Unix paths', () => {
         permissionMode: 'bypassPermissions',
       })
 
-      expect(spec.args).toContain('--permission-mode')
-      expect(spec.args).toContain('bypassPermissions')
-      expect(spec.args).toContain('--resume')
-      expect(spec.args).toContain(VALID_CLAUDE_SESSION_ID)
+      const cmdStr = spec.args[1]
+      expect(cmdStr).toContain('--permission-mode')
+      expect(cmdStr).toContain('bypassPermissions')
+      expect(cmdStr).toContain('--resume')
+      expect(cmdStr).toContain(VALID_CLAUDE_SESSION_ID)
     })
   })
 
@@ -1077,12 +1101,15 @@ describe('buildSpawnSpec Unix paths', () => {
       mockPlatform('linux')
     })
 
-    it('spawns claude command directly on Linux', () => {
+    it('spawns claude via login shell on Linux', () => {
       delete process.env.CLAUDE_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('claude', '/home/user/project', 'system')
 
-      expect(spec.file).toBe('claude')
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'claude'")
       expect(spec.cwd).toBe('/home/user/project')
     })
 
@@ -1091,18 +1118,20 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('claude', '/home/user', 'system')
 
-      expect(spec.file).toBe('/usr/local/bin/my-claude')
+      expect(spec.args[1]).toContain('/usr/local/bin/my-claude')
     })
 
     it('handles --resume flag correctly on Linux', () => {
       delete process.env.CLAUDE_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('claude', '/home/user', 'system', VALID_CLAUDE_SESSION_ID)
 
-      expect(spec.args).toContain('--resume')
-      expect(spec.args).toContain(VALID_CLAUDE_SESSION_ID)
-      expectClaudeTurnCompleteArgs(spec.args)
-      expect(spec.args.slice(-2)).toEqual(['--resume', VALID_CLAUDE_SESSION_ID])
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'claude'")
+      expect(spec.args[1]).toContain('--resume')
+      expect(spec.args[1]).toContain(VALID_CLAUDE_SESSION_ID)
     })
 
     it('includes proper env vars in claude mode on Linux', () => {
@@ -1121,13 +1150,15 @@ describe('buildSpawnSpec Unix paths', () => {
       mockPlatform('darwin')
     })
 
-    it('spawns codex command directly on macOS', () => {
+    it('spawns codex via login shell on macOS', () => {
       delete process.env.CODEX_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('codex', '/Users/john/project', 'system')
 
-      expect(spec.file).toBe('codex')
-      expectCodexTurnCompleteArgs(spec.args)
+      expect(spec.file).toBe('/bin/zsh')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'codex'")
       expect(spec.cwd).toBe('/Users/john/project')
     })
 
@@ -1136,7 +1167,7 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('codex', '/Users/john', 'system')
 
-      expect(spec.file).toBe('/Applications/Codex.app/Contents/MacOS/codex')
+      expect(spec.args[1]).toContain('/Applications/Codex.app/Contents/MacOS/codex')
     })
 
     it('includes proper env vars in codex mode on macOS', () => {
@@ -1442,33 +1473,42 @@ describe('buildSpawnSpec WSL paths', () => {
   })
 
   describe('coding CLI modes in WSL with Linux shell', () => {
-    it('spawns claude directly in WSL with system shell', () => {
+    it('spawns claude via login shell in WSL with system shell', () => {
       mockWsl()
       delete process.env.CLAUDE_CMD
+      process.env.SHELL = '/bin/bash'
 
       const spec = buildSpawnSpec('claude', '/home/user/project', 'system')
 
-      expect(spec.file).toBe('claude')
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toMatch(/exec\s+'claude'/)
       expect(spec.cwd).toBe('/home/user/project')
     })
 
-    it('spawns codex directly in WSL with system shell', () => {
+    it('spawns codex via login shell in WSL with system shell', () => {
       mockWsl()
       delete process.env.CODEX_CMD
+      process.env.SHELL = '/bin/bash'
 
       const spec = buildSpawnSpec('codex', '/home/user/project', 'system')
 
-      expect(spec.file).toBe('codex')
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toMatch(/exec\s+'codex'/)
       expect(spec.cwd).toBe('/home/user/project')
     })
 
     it('converts Windows cwd to WSL path for codex in WSL system shell', () => {
       mockWsl()
       delete process.env.CODEX_CMD
+      process.env.SHELL = '/bin/bash'
 
       const spec = buildSpawnSpec('codex', String.raw`D:\users\dan\project`, 'system')
 
-      expect(spec.file).toBe('codex')
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toMatch(/exec\s+'codex'/)
       expect(spec.cwd).toBe('/mnt/d/users/dan/project')
     })
 
@@ -2249,12 +2289,15 @@ describe('buildSpawnSpec Unix paths', () => {
       mockPlatform('darwin')
     })
 
-    it('spawns claude command directly without shell wrapper', () => {
+    it('spawns claude via login shell on Unix', () => {
       delete process.env.CLAUDE_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('claude', '/Users/john/project', 'system')
 
-      expect(spec.file).toBe('claude')
+      expect(spec.file).toBe('/bin/zsh')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'claude'")
       expect(spec.cwd).toBe('/Users/john/project')
     })
 
@@ -2263,26 +2306,30 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('claude', '/Users/john', 'system')
 
-      expect(spec.file).toBe('/usr/local/bin/claude-dev')
+      expect(spec.args[1]).toContain('/usr/local/bin/claude-dev')
     })
 
     it('passes --resume flag with session ID when resuming', () => {
       delete process.env.CLAUDE_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('claude', '/Users/john', 'system', VALID_CLAUDE_SESSION_ID)
 
-      expect(spec.file).toBe('claude')
-      expect(spec.args).toContain('--resume')
-      expect(spec.args).toContain(VALID_CLAUDE_SESSION_ID)
+      expect(spec.file).toBe('/bin/zsh')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'claude'")
+      expect(spec.args[1]).toContain('--resume')
+      expect(spec.args[1]).toContain(VALID_CLAUDE_SESSION_ID)
     })
 
     it('does not include --resume when no session ID provided', () => {
       delete process.env.CLAUDE_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('claude', '/Users/john', 'system')
 
-      expect(spec.args).not.toContain('--resume')
-      expectClaudeTurnCompleteArgs(spec.args)
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).not.toContain('--resume')
     })
   })
 
@@ -2291,13 +2338,15 @@ describe('buildSpawnSpec Unix paths', () => {
       mockPlatform('linux')
     })
 
-    it('spawns codex command directly', () => {
+    it('spawns codex via login shell on Unix', () => {
       delete process.env.CODEX_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('codex', '/home/user/project', 'system')
 
-      expect(spec.file).toBe('codex')
-      expectCodexTurnCompleteArgs(spec.args)
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'codex'")
       expect(spec.cwd).toBe('/home/user/project')
     })
 
@@ -2306,7 +2355,7 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('codex', '/home/user', 'system')
 
-      expect(spec.file).toBe('/opt/codex/bin/codex')
+      expect(spec.args[1]).toContain('/opt/codex/bin/codex')
     })
   })
 
@@ -2504,12 +2553,15 @@ describe('buildSpawnSpec Unix paths', () => {
       mockPlatform('linux')
     })
 
-    it('spawns claude command directly on Linux', () => {
+    it('spawns claude via login shell on Linux', () => {
       delete process.env.CLAUDE_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('claude', '/home/user/project', 'system')
 
-      expect(spec.file).toBe('claude')
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'claude'")
       expect(spec.cwd).toBe('/home/user/project')
     })
 
@@ -2518,18 +2570,20 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('claude', '/home/user', 'system')
 
-      expect(spec.file).toBe('/usr/local/bin/my-claude')
+      expect(spec.args[1]).toContain('/usr/local/bin/my-claude')
     })
 
     it('handles --resume flag correctly on Linux', () => {
       delete process.env.CLAUDE_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('claude', '/home/user', 'system', VALID_CLAUDE_SESSION_ID)
 
-      expect(spec.args).toContain('--resume')
-      expect(spec.args).toContain(VALID_CLAUDE_SESSION_ID)
-      expectClaudeTurnCompleteArgs(spec.args)
-      expect(spec.args.slice(-2)).toEqual(['--resume', VALID_CLAUDE_SESSION_ID])
+      expect(spec.file).toBe('/bin/bash')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'claude'")
+      expect(spec.args[1]).toContain('--resume')
+      expect(spec.args[1]).toContain(VALID_CLAUDE_SESSION_ID)
     })
 
     it('includes proper env vars in claude mode on Linux', () => {
@@ -2548,13 +2602,15 @@ describe('buildSpawnSpec Unix paths', () => {
       mockPlatform('darwin')
     })
 
-    it('spawns codex command directly on macOS', () => {
+    it('spawns codex via login shell on macOS', () => {
       delete process.env.CODEX_CMD
+      delete process.env.SHELL
 
       const spec = buildSpawnSpec('codex', '/Users/john/project', 'system')
 
-      expect(spec.file).toBe('codex')
-      expectCodexTurnCompleteArgs(spec.args)
+      expect(spec.file).toBe('/bin/zsh')
+      expect(spec.args[0]).toBe('-lc')
+      expect(spec.args[1]).toContain("exec 'codex'")
       expect(spec.cwd).toBe('/Users/john/project')
     })
 
@@ -2563,7 +2619,7 @@ describe('buildSpawnSpec Unix paths', () => {
 
       const spec = buildSpawnSpec('codex', '/Users/john', 'system')
 
-      expect(spec.file).toBe('/Applications/Codex.app/Contents/MacOS/codex')
+      expect(spec.args[1]).toContain('/Applications/Codex.app/Contents/MacOS/codex')
     })
 
     it('includes proper env vars in codex mode on macOS', () => {
@@ -2868,23 +2924,29 @@ describe('buildSpawnSpec Unix paths', () => {
     })
 
     describe('claude mode on Mac/Linux', () => {
-      it('spawns claude command on macOS when mode is claude', () => {
+      it('spawns claude via login shell on macOS when mode is claude', () => {
         mockPlatform('darwin')
         delete process.env.CLAUDE_CMD
+        delete process.env.SHELL
 
         const spec = buildSpawnSpec('claude', '/Users/developer', 'system')
 
-        expect(spec.file).toBe('claude')
+        expect(spec.file).toBe('/bin/zsh')
+        expect(spec.args[0]).toBe('-lc')
+        expect(spec.args[1]).toContain("exec 'claude'")
         expect(spec.cwd).toBe('/Users/developer')
       })
 
-      it('spawns claude command on Linux when mode is claude', () => {
+      it('spawns claude via login shell on Linux when mode is claude', () => {
         mockPlatform('linux')
         delete process.env.CLAUDE_CMD
+        delete process.env.SHELL
 
         const spec = buildSpawnSpec('claude', '/home/user', 'system')
 
-        expect(spec.file).toBe('claude')
+        expect(spec.file).toBe('/bin/bash')
+        expect(spec.args[0]).toBe('-lc')
+        expect(spec.args[1]).toContain("exec 'claude'")
         expect(spec.cwd).toBe('/home/user')
       })
 
@@ -2894,47 +2956,60 @@ describe('buildSpawnSpec Unix paths', () => {
 
         const spec = buildSpawnSpec('claude', '/Users/developer', 'system')
 
-        expect(spec.file).toBe('/opt/claude/bin/claude')
+        expect(spec.args[1]).toContain('/opt/claude/bin/claude')
       })
 
       it('includes --resume flag with session ID when resuming', () => {
         mockPlatform('darwin')
         delete process.env.CLAUDE_CMD
+        delete process.env.SHELL
 
         const spec = buildSpawnSpec('claude', '/Users/developer', 'system', VALID_CLAUDE_SESSION_ID)
 
-        expect(spec.args).toContain('--resume')
-        expect(spec.args).toContain(VALID_CLAUDE_SESSION_ID)
+        expect(spec.file).toBe('/bin/zsh')
+        expect(spec.args[0]).toBe('-lc')
+        expect(spec.args[1]).toContain("exec 'claude'")
+        expect(spec.args[1]).toContain('--resume')
+        expect(spec.args[1]).toContain(VALID_CLAUDE_SESSION_ID)
       })
 
-      it('has empty args when not resuming session', () => {
+      it('login shell command string contains turn-complete args when not resuming', () => {
         mockPlatform('darwin')
         delete process.env.CLAUDE_CMD
+        delete process.env.SHELL
 
         const spec = buildSpawnSpec('claude', '/Users/developer', 'system')
 
-        expectClaudeTurnCompleteArgs(spec.args)
+        expect(spec.file).toBe('/bin/zsh')
+        expect(spec.args[0]).toBe('-lc')
+        expect(spec.args[1]).toContain("exec 'claude'")
       })
     })
 
     describe('codex mode on Mac/Linux', () => {
-      it('spawns codex command on macOS when mode is codex', () => {
+      it('spawns codex via login shell on macOS when mode is codex', () => {
         mockPlatform('darwin')
         delete process.env.CODEX_CMD
+        delete process.env.SHELL
 
         const spec = buildSpawnSpec('codex', '/Users/developer', 'system')
 
-        expect(spec.file).toBe('codex')
+        expect(spec.file).toBe('/bin/zsh')
+        expect(spec.args[0]).toBe('-lc')
+        expect(spec.args[1]).toContain("exec 'codex'")
         expect(spec.cwd).toBe('/Users/developer')
       })
 
-      it('spawns codex command on Linux when mode is codex', () => {
+      it('spawns codex via login shell on Linux when mode is codex', () => {
         mockPlatform('linux')
         delete process.env.CODEX_CMD
+        delete process.env.SHELL
 
         const spec = buildSpawnSpec('codex', '/home/user', 'system')
 
-        expect(spec.file).toBe('codex')
+        expect(spec.file).toBe('/bin/bash')
+        expect(spec.args[0]).toBe('-lc')
+        expect(spec.args[1]).toContain("exec 'codex'")
         expect(spec.cwd).toBe('/home/user')
       })
 
@@ -2944,16 +3019,19 @@ describe('buildSpawnSpec Unix paths', () => {
 
         const spec = buildSpawnSpec('codex', '/home/user', 'system')
 
-        expect(spec.file).toBe('/usr/local/bin/codex-cli')
+        expect(spec.args[1]).toContain('/usr/local/bin/codex-cli')
       })
 
-      it('has empty args for codex mode', () => {
+      it('login shell command string contains codex args', () => {
         mockPlatform('linux')
         delete process.env.CODEX_CMD
+        delete process.env.SHELL
 
         const spec = buildSpawnSpec('codex', '/home/user', 'system')
 
-        expectCodexTurnCompleteArgs(spec.args)
+        expect(spec.file).toBe('/bin/bash')
+        expect(spec.args[0]).toBe('-lc')
+        expect(spec.args[1]).toContain("exec 'codex'")
       })
     })
 

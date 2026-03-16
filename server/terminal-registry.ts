@@ -610,6 +610,11 @@ function buildCmdCommand(command: string, args: string[]): string {
   return [command, ...args].map(quoteCmdArg).join(' ')
 }
 
+/** POSIX single-quote escaping: wraps in single quotes, escaping embedded quotes */
+export function quotePosixArg(arg: string): string {
+  return `'${arg.replace(/'/g, "'\\''")}'`
+}
+
 function quotePowerShellLiteral(arg: string): string {
   return `'${arg.replace(/'/g, "''")}'`
 }
@@ -779,10 +784,15 @@ export function buildSpawnSpec(
     return { file: systemShell, args: ['-l'], cwd: unixCwd, env }
   }
 
+  // Spawn coding CLIs through a login shell so that shell profile env vars
+  // (e.g. NODE_EXTRA_CA_CERTS, PATH additions) are available. Without this,
+  // processes launched by launchd/systemd lack profile-sourced vars.
+  // `exec` replaces the shell with the CLI for clean signal handling.
   const cli = resolveCodingCliCommand(mode, normalizedResume, 'unix', providerSettings)
   const cmd = cli?.command || mode
   const args = cli?.args || []
-  return { file: cmd, args, cwd: unixCwd, env }
+  const cmdStr = [cmd, ...args].map(quotePosixArg).join(' ')
+  return { file: systemShell, args: ['-lc', `exec ${cmdStr}`], cwd: unixCwd, env }
 }
 
 export class TerminalRegistry extends EventEmitter {

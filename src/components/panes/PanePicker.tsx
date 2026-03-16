@@ -5,10 +5,10 @@ import { cn } from '@/lib/utils'
 import { useAppSelector } from '@/store/hooks'
 import { ContextIds } from '@/components/context-menu/context-menu-constants'
 import { CODING_CLI_PROVIDER_CONFIGS, type CodingCliProviderConfig } from '@/lib/coding-cli-utils'
-import { ProviderIcon } from '@/components/icons/provider-icons'
+import { ProviderIcon, ClaudeDangerousIcon } from '@/components/icons/provider-icons'
 import type { CodingCliProviderName } from '@/lib/coding-cli-types'
 
-export type PanePickerType = 'shell' | 'cmd' | 'powershell' | 'wsl' | 'browser' | 'editor' | 'claude-web' | CodingCliProviderName
+export type PanePickerType = 'shell' | 'cmd' | 'powershell' | 'wsl' | 'browser' | 'editor' | 'claude-web' | 'claude-dangerous' | CodingCliProviderName
 
 type IconComponent = ComponentType<{ className?: string } & SVGProps<SVGSVGElement>>
 
@@ -110,8 +110,13 @@ export default function PanePicker({ onSelect, onCancel, isOnlyPane, tabId, pane
       ? [{ type: 'claude-web' as PanePickerType, label: 'freshclaude', icon: null, providerName: 'claude' as CodingCliProviderName, shortcut: 'A' }]
       : []
 
-    // Order: CLIs, freshclaude, Editor, Browser, Shell(s)
-    return [...cliOptions, ...claudeWebOption, ...nonShellOptions, ...shellOptions]
+    // Claude dangerous mode: claude with --dangerously-skip-permissions
+    const claudeDangerousOption: PickerOption[] = (availableClis['claude'] && enabledProviders.includes('claude'))
+      ? [{ type: 'claude-dangerous' as PanePickerType, label: 'Claude YOLO', icon: ClaudeDangerousIcon, shortcut: 'D' }]
+      : []
+
+    // Order: CLIs, freshclaude, dangerous, Editor, Browser, Shell(s)
+    return [...cliOptions, ...claudeWebOption, ...claudeDangerousOption, ...nonShellOptions, ...shellOptions]
   }, [platform, availableClis, enabledProviders])
 
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null)

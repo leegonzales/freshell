@@ -1051,7 +1051,7 @@ export class WsHandler {
             cwd: m.cwd,
             resumeSessionId: effectiveResumeSessionId,
             envContext: { tabId: m.tabId, paneId: m.paneId },
-            providerSettings: providerSettings ? { permissionMode: providerSettings.permissionMode } : undefined,
+            providerSettings: { permissionMode: m.permissionMode ?? providerSettings?.permissionMode },
           })
 
           if (m.mode !== 'shell' && typeof m.cwd === 'string' && m.cwd.trim()) {

@@ -1203,7 +1203,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
 
     // NOTE: We intentionally don't destructure terminalId here.
     // We read it from terminalIdRef.current to avoid stale closures.
-    const { createRequestId, mode, shell, initialCwd } = terminalContent
+    const { createRequestId, mode, shell, initialCwd, permissionMode } = terminalContent
 
     let unsub = () => {}
     let unsubReconnect = () => {}
@@ -1245,6 +1245,7 @@ export default function TerminalView({ tabId, paneId, paneContent, hidden }: Ter
         tabId,
         paneId: paneIdRef.current,
         ...(restore ? { restore: true } : {}),
+        ...(permissionMode ? { permissionMode } : {}),
       })
     }
 

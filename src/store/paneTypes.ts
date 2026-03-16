@@ -28,6 +28,8 @@ export type TerminalPaneContent = {
   sessionRef?: SessionLocator
   /** Initial working directory */
   initialCwd?: string
+  /** Per-terminal permission mode override (e.g. 'bypassPermissions' for dangerous mode) */
+  permissionMode?: string
 }
 
 /**

@@ -425,6 +425,7 @@ function PickerWrapper({
     | { step: 'type' }
     | { step: 'directory'; providerType: CodingCliProviderName }
     | { step: 'directory'; providerType: 'claude-web' }
+    | { step: 'directory'; providerType: 'claude-dangerous' }
   >({ step: 'type' })
 
   const createContentForType = useCallback((type: PanePickerType, cwd?: string): PaneContent => {
@@ -437,6 +438,18 @@ function PickerWrapper({
         model: defaults?.defaultModel,
         permissionMode: defaults?.defaultPermissionMode,
         effort: defaults?.defaultEffort,
+        ...(cwd ? { initialCwd: cwd } : {}),
+      }
+    }
+
+    if (type === 'claude-dangerous') {
+      return {
+        kind: 'terminal',
+        mode: 'claude' as const,
+        shell: 'system',
+        createRequestId: nanoid(),
+        status: 'creating',
+        permissionMode: 'bypassPermissions',
         ...(cwd ? { initialCwd: cwd } : {}),
       }
     }
@@ -511,6 +524,11 @@ function PickerWrapper({
       return
     }
 
+    if (type === 'claude-dangerous') {
+      setStep({ step: 'directory', providerType: 'claude-dangerous' })
+      return
+    }
+
     if (isCodingCliProviderName(type)) {
       setStep({ step: 'directory', providerType: type })
       return
@@ -527,8 +545,8 @@ function PickerWrapper({
     const newContent = createContentForType(providerType, cwd)
     dispatch(updatePaneContent({ tabId, paneId, content: newContent }))
 
-    // Save the selected directory for the provider (use 'claude' key for claude-web)
-    const settingsKey = providerType === 'claude-web' ? 'claude' : providerType
+    // Save the selected directory for the provider (use 'claude' key for claude-web and claude-dangerous)
+    const settingsKey = (providerType === 'claude-web' || providerType === 'claude-dangerous') ? 'claude' : providerType
     const existingProviderSettings = settings?.codingCli?.providers?.[settingsKey] || {}
     const patch = {
       codingCli: { providers: { [settingsKey]: { ...existingProviderSettings, cwd } } },
@@ -545,8 +563,8 @@ function PickerWrapper({
 
   if (step.step === 'directory') {
     const providerType = step.providerType
-    const providerLabel = providerType === 'claude-web' ? 'freshclaude' : getProviderLabel(providerType)
-    const settingsKey = providerType === 'claude-web' ? 'claude' : providerType
+    const providerLabel = providerType === 'claude-web' ? 'freshclaude' : providerType === 'claude-dangerous' ? 'Claude YOLO' : getProviderLabel(providerType)
+    const settingsKey = (providerType === 'claude-web' || providerType === 'claude-dangerous') ? 'claude' : providerType
     const globalDefault = settings?.codingCli?.providers?.[settingsKey]?.cwd
     const defaultCwd = tabPref.defaultCwd ?? globalDefault
     return (
